@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini-Powered Research Cyborg Workspace & Hand Tracking</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>AI-Powered Research Cyborg Workspace & Hand Tracking</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -30,46 +30,77 @@
             overflow: hidden; background-color: #05050a;
             font-family: 'Segoe UI', sans-serif;
             user-select: none;
+            /* Respect notches / safe areas on Android & iOS */
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+            box-sizing: border-box;
         }
         #canvas-container { width: 100%; height: 100%; position: absolute; top:0; left:0; z-index: 1; }
         
-        #webcam { position: absolute; bottom: 20px; right: 20px; width: 180px; height: 135px; 
+        #webcam { position: absolute; bottom: 20px; right: 20px; width: min(180px, 26vw); height: min(135px, 19.5vw);
+                  min-width: 90px; min-height: 67px;
                   border: 2px solid var(--neon-magenta); border-radius: 8px; transform: scaleX(-1); z-index: 10;
                   box-shadow: 0 0 15px rgba(255, 0, 127, 0.4); background: #000; }
 
         /* HUD Panels */
-        #hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; box-sizing: border-box; padding: 20px; }
+        #hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; box-sizing: border-box; padding: clamp(10px, 2vw, 20px); }
         
-        .hud-panel { position: absolute; background: rgba(5, 5, 15, 0.9); border: 1px solid var(--neon-cyan); backdrop-filter: blur(10px); padding: 15px; color: var(--neon-cyan); font-weight: bold; border-radius: 6px; box-shadow: 0 0 15px rgba(0,240,255,0.1); }
-        #telemetry { top: 20px; left: 20px; width: 260px; font-size: 0.9rem; }
-        #assistant-panel { top: 20px; right: 20px; width: 340px; border-color: var(--neon-magenta); color: var(--neon-magenta); }
-        #tutorial-panel { top: 320px; right: 20px; width: 340px; border-color: var(--neon-yellow); color: var(--neon-yellow); }
-        #controls { bottom: 20px; left: 20px; pointer-events: auto; display: flex; gap: 10px; }
+        .hud-panel { position: absolute; background: rgba(5, 5, 15, 0.9); border: 1px solid var(--neon-cyan); backdrop-filter: blur(10px); padding: clamp(8px, 1.5vw, 15px); color: var(--neon-cyan); font-weight: bold; border-radius: 6px; box-shadow: 0 0 15px rgba(0,240,255,0.1); box-sizing: border-box; max-width: 92vw; }
+        #telemetry { top: clamp(10px, 2vw, 20px); left: clamp(10px, 2vw, 20px); width: min(260px, 40vw); font-size: clamp(0.7rem, 1.6vw, 0.9rem); }
+        #assistant-panel { top: clamp(10px, 2vw, 20px); right: clamp(10px, 2vw, 20px); width: min(340px, 44vw); border-color: var(--neon-magenta); color: var(--neon-magenta); }
+        #tutorial-panel { top: clamp(280px, 32vh, 320px); right: clamp(10px, 2vw, 20px); width: min(340px, 44vw); border-color: var(--neon-yellow); color: var(--neon-yellow); }
+        #controls { bottom: clamp(10px, 2vw, 20px); left: clamp(10px, 2vw, 20px); pointer-events: auto; display: flex; flex-wrap: wrap; gap: 10px; max-width: 60vw; }
         
-        .step-item { margin: 6px 0; padding: 6px; border-left: 3px solid #333; color: #666; font-size: 0.85rem; transition: all 0.3s; }
+        .step-item { margin: 6px 0; padding: 6px; border-left: 3px solid #333; color: #666; font-size: clamp(0.7rem, 1.5vw, 0.85rem); transition: all 0.3s; }
         .step-item.active { border-left-color: var(--neon-yellow); color: var(--neon-yellow); background: rgba(255,234,0,0.05); }
         .step-item.done { border-left-color: #00ff66; color: #00ff66; text-decoration: line-through; opacity: 0.5; }
 
-        button { background: transparent; border: 1px solid var(--neon-cyan); color: var(--neon-cyan); padding: 10px 18px; cursor: pointer; font-weight: bold; border-radius: 4px; transition: all 0.3s; }
+        button { background: transparent; border: 1px solid var(--neon-cyan); color: var(--neon-cyan); padding: 10px 18px; cursor: pointer; font-weight: bold; border-radius: 4px; transition: all 0.3s; font-size: clamp(0.75rem, 1.6vw, 1rem); touch-action: manipulation; }
         button:hover, button.active { background: var(--neon-cyan); color: #05050a; box-shadow: 0 0 15px var(--neon-cyan); }
         
         .meter-container { width: 100%; background: #101020; border: 1px solid var(--neon-cyan); height: 8px; margin-top: 4px; border-radius: 2px; overflow: hidden; }
         .meter-bar { height: 100%; background: var(--neon-cyan); width: 0%; }
         
-        #audio-prompt { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050d; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--neon-cyan); z-index: 100; cursor: pointer; }
-        #audio-prompt h2 { font-size: 2rem; letter-spacing: 3px; margin-bottom: 10px; text-shadow: 0 0 10px var(--neon-cyan); }
-        
-        #api-key-input { background: #101020; border: 1px solid var(--neon-magenta); color: #fff; padding: 10px; width: 300px; border-radius: 4px; text-align: center; margin-top: 20px; font-weight: bold; font-family: monospace; }
+        #audio-prompt { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050d; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--neon-cyan); z-index: 100; cursor: pointer; padding: 20px; box-sizing: border-box; text-align: center; }
+        #audio-prompt h2 { font-size: clamp(1.3rem, 4vw, 2rem); letter-spacing: 3px; margin-bottom: 10px; text-shadow: 0 0 10px var(--neon-cyan); }
+        #audio-prompt p { font-size: clamp(0.85rem, 2.2vw, 1rem); max-width: 90vw; margin: 4px 0; }
+
+        #provider-select { margin-top: 18px; display: flex; gap: clamp(12px, 4vw, 24px); font-size: clamp(0.85rem, 2vw, 1rem); flex-wrap: wrap; justify-content: center; }
+        #provider-select label { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+
+        #api-key-input { background: #101020; border: 1px solid var(--neon-magenta); color: #fff; padding: 10px; width: min(300px, 85vw); border-radius: 4px; text-align: center; margin-top: 20px; font-weight: bold; font-family: monospace; box-sizing: border-box; }
+
+        /* --- Responsive layout: tablets & Android phones --- */
+        @media (max-width: 820px) {
+            #hud {
+                display: flex; flex-direction: column; align-items: stretch;
+                gap: 8px; overflow-y: auto; pointer-events: none;
+                padding: 8px; padding-bottom: 100px; /* leave room for floating webcam */
+            }
+            .hud-panel { position: static !important; width: 100% !important; max-width: 100%; }
+            #controls { order: 99; pointer-events: auto; max-width: 100%; justify-content: center; }
+            #assistant-text { max-height: 110px; min-height: 60px; }
+            #webcam { width: 110px; height: 82px; bottom: 10px; right: 10px; }
+        }
+
+        @media (max-width: 480px) {
+            #webcam { width: 90px; height: 67px; }
+            .hud-panel { font-size: 0.75rem; padding: 8px; }
+            button { padding: 8px 12px; }
+        }
     </style>
 </head>
 <body>
 
     <div id="audio-prompt">
-        <h2>⚡ INITIALIZE GEMINI CORE ⚡</h2>
-        <p>Enter your Gemini API key below to establish the intelligence matrix link,</p>
-        <p>then click anywhere on the background to mount the graphics grid.</p>
+        <h2>⚡ INITIALIZE AI CORE ⚡</h2>
+        <p>Choose an intelligence provider and enter its API key to establish the matrix link,</p>
+        <p>then click "BOOT SYSTEM ENGINE" to mount the graphics grid.</p>
+        <div id="provider-select" onclick="event.stopPropagation()">
+            <label><input type="radio" name="ai-provider" value="gemini" checked> Gemini</label>
+            <label><input type="radio" name="ai-provider" value="openai"> OpenAI (GPT)</label>
+        </div>
         <input type="password" id="api-key-input" placeholder="PASTE GEMINI_API_KEY HERE" onclick="event.stopPropagation()">
-        <button style="margin-top: 15px; border-color: var(--neon-magenta); color: var(--neon-magenta);" onclick="initSystem()">BOOT SYSTEM ENGINE</button>
+        <button style="margin-top: 15px; border-color: var(--neon-magenta); color: var(--neon-magenta);" onclick="event.stopPropagation(); initSystem()">BOOT SYSTEM ENGINE</button>
     </div>
 
     <div id="canvas-container"></div>
@@ -82,14 +113,14 @@
             <div>Y-COORD: <span id="pos-y">0.00</span></div>
             <div>Z-DEPTH: <span id="pos-z">0.00</span></div>
             <div>LIGHT MATRIX: <span id="subsystem-state" style="color: var(--neon-magenta);">OFF</span></div>
-            <div>GEMINI NODE: <span id="voice-state" style="color: var(--neon-yellow);">IDLE</span></div>
+            <div><span id="ai-node-label">AI NODE:</span> <span id="voice-state" style="color: var(--neon-yellow);">IDLE</span></div>
             <div>ENGINE FREQ: <span id="engine-rpm" style="color: var(--neon-cyan);">0 Hz</span></div>
             <div style="margin-top: 8px; font-size: 0.75rem;">GESTURE INTERACTION FORCE:</div>
             <div class="meter-container"><div id="force-bar" class="meter-bar"></div></div>
         </div>
 
         <div id="assistant-panel" class="hud-panel">
-            <div style="border-bottom: 1px solid var(--neon-magenta); margin-bottom: 8px; padding-bottom:4px;">🤖 GEMINI CRADLE MATRIX</div>
+            <div style="border-bottom: 1px solid var(--neon-magenta); margin-bottom: 8px; padding-bottom:4px;">🤖 AI CRADLE MATRIX</div>
             <div id="assistant-text" style="font-size: 0.85rem; font-weight: normal; color: #fff; min-height: 140px; overflow-y: auto; max-height: 200px; line-height: 1.4;">System offline. Awaiting secure credential verification...</div>
         </div>
 
@@ -99,7 +130,7 @@
             <div id="step-2" class="step-item">2. Push hand CLOSER to shift deep space</div>
             <div id="step-3" class="step-item">3. Make a tight FIST to dynamically scale up</div>
             <div id="step-4" class="step-item">4. PINCH Thumb + Index to activate subsystems</div>
-            <div id="step-5" class="step-item">5. Ask ANY question for Gemini to research</div>
+            <div id="step-5" class="step-item">5. Ask ANY question for the AI to research</div>
             <div id="calibration-status" style="margin-top:10px; font-size:0.8rem; text-align:center; color:#fff;">CALIBRATION: PENDING</div>
         </div>
 
@@ -131,7 +162,10 @@
         let recognition = null;
         let isSpeakingBack = false;
         let isRecognitionActive = false;
-        let aiClient = null;
+        let aiClient = null;          // Gemini SDK client (when provider === 'gemini')
+        let aiProvider = 'gemini';    // 'gemini' | 'openai'
+        let openaiApiKey = null;      // Raw key (when provider === 'openai')
+        let aiConfigured = false;
 
         // --- CORE SYNTHESIZED AUDIO ENGINE ---
         let audioCtx = null;
@@ -316,7 +350,8 @@
                     const userQuestion = finalTranscript.trim();
                     finalTranscript = ''; 
                     
-                    document.getElementById('assistant-text').innerText = `Querying Gemini Matrix: "${userQuestion}"...`;
+                    const queryingLabel = aiProvider === 'openai' ? 'OpenAI Matrix' : 'Gemini Matrix';
+                    document.getElementById('assistant-text').innerText = `Querying ${queryingLabel}: "${userQuestion}"...`;
                     forceSwitchToHuman();
 
                     document.getElementById('voice-state').innerText = "THINKING";
@@ -325,25 +360,18 @@
                     stopListening(); // Mute local audio tracking while waiting for pipeline generation execution
 
                     try {
-                        if (!aiClient) {
-                            speak("Gemini intelligence pipeline uninitialized. Please supply a valid key coordinate.", true);
+                        if (!aiConfigured) {
+                            speak("AI intelligence pipeline uninitialized. Please supply a valid key coordinate.", true);
                             return;
                         }
 
-                        const response = await aiClient.models.generateContent({
-                            model: 'gemini-2.5-flash',
-                            contents: userQuestion,
-                            config: {
-                                systemInstruction: "You are an advanced autonomous cyborg 3D assistant model. Speak directly to the user. Keep your answers concise, fluid, and strictly limited to 2 short sentences. Do not use asterisks or markdown formatting structures.",
-                            }
-                        });
-
-                        const cleanReply = response.text.trim();
+                        const cleanReply = await queryAI(userQuestion);
                         speak(cleanReply, true);
 
                     } catch (apiError) {
-                        console.error("Gemini Frame Failure: ", apiError);
-                        speak("Secure link to Gemini cloud cluster denied. Verify your API configuration matrix.", true);
+                        console.error("AI Frame Failure: ", apiError);
+                        const providerLabel = aiProvider === 'openai' ? 'OpenAI' : 'Gemini';
+                        speak(`Secure link to ${providerLabel} cloud cluster denied. Verify your API configuration matrix.`, true);
                     }
 
                     if (tutorialStep === 5) {
@@ -384,14 +412,81 @@
             }
         }
 
+        // --- PROVIDER-AGNOSTIC AI QUERY DISPATCH ---
+        const SYSTEM_INSTRUCTION = "You are an advanced autonomous cyborg 3D assistant model. Speak directly to the user. Keep your answers concise, fluid, and strictly limited to 2 short sentences. Do not use asterisks or markdown formatting structures.";
+
+        async function queryAI(userQuestion) {
+            if (aiProvider === 'gemini') {
+                const response = await aiClient.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: userQuestion,
+                    config: { systemInstruction: SYSTEM_INSTRUCTION }
+                });
+                return response.text.trim();
+            }
+
+            if (aiProvider === 'openai') {
+                const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${openaiApiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        messages: [
+                            { role: 'system', content: SYSTEM_INSTRUCTION },
+                            { role: 'user', content: userQuestion }
+                        ],
+                        max_tokens: 150,
+                        temperature: 0.7
+                    })
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text().catch(() => res.statusText);
+                    throw new Error(`OpenAI HTTP ${res.status}: ${errText}`);
+                }
+
+                const data = await res.json();
+                const reply = data?.choices?.[0]?.message?.content;
+                if (!reply) throw new Error("OpenAI returned an empty response.");
+                return reply.trim();
+            }
+
+            throw new Error(`Unknown AI provider: ${aiProvider}`);
+        }
+
+        // Keep the boot-screen placeholder in sync with the selected provider
+        document.querySelectorAll('input[name="ai-provider"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const input = document.getElementById('api-key-input');
+                input.placeholder = radio.value === 'openai' ? 'PASTE OPENAI_API_KEY HERE' : 'PASTE GEMINI_API_KEY HERE';
+            });
+        });
+
         window.initSystem = function() {
+            const selectedProvider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'gemini';
             const apiKey = document.getElementById('api-key-input').value.trim();
+            const providerLabel = selectedProvider === 'openai' ? 'OpenAI' : 'Gemini';
+
             if (!apiKey) {
-                alert("An active Gemini API Key credential is required to boot the cloud logic nodes.");
+                alert(`An active ${providerLabel} API Key credential is required to boot the cloud logic nodes.`);
                 return;
             }
 
-            aiClient = new GoogleGenAI({ apiKey: apiKey });
+            aiProvider = selectedProvider;
+
+            if (aiProvider === 'gemini') {
+                aiClient = new GoogleGenAI({ apiKey: apiKey });
+            } else {
+                openaiApiKey = apiKey;
+            }
+            aiConfigured = true;
+
+            document.getElementById('assistant-panel').firstElementChild.innerText = `🤖 ${providerLabel.toUpperCase()} CRADLE MATRIX`;
+            const nodeLabel = document.getElementById('ai-node-label');
+            if (nodeLabel) nodeLabel.innerText = `${providerLabel.toUpperCase()} NODE:`;
 
             document.getElementById('audio-prompt').style.display = 'none';
             if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -399,7 +494,7 @@
             initAudioEngine();
             initSpeechRecognition();
             
-            speak("Gemini link authorized. Acoustic propulsion drives operational. Slide your target hand left or right.");
+            speak(`${providerLabel} link authorized. Acoustic propulsion drives operational. Slide your target hand left or right.`);
             initMediaPipe();
         }
 
@@ -435,6 +530,9 @@
             scene.add(models['car']);
 
             window.addEventListener('resize', onWindowResize);
+            // Android/mobile browsers don't always fire 'resize' promptly on rotation,
+            // so re-measure after the layout settles.
+            window.addEventListener('orientationchange', () => setTimeout(onWindowResize, 300));
             animate();
         }
 
@@ -536,7 +634,7 @@
 
             if (isSpeakingBack && cyborgEye && activeModelName === 'human') {
                 cyborgEye.scale.y = 1.8 + Math.sin(performance.now() * 0.03) * 1.5;
-                document.getElementById('voice-state').innerText = "GEMINI CORE RESPONDING";
+                document.getElementById('voice-state').innerText = `${aiProvider === 'openai' ? 'OPENAI' : 'GEMINI'} CORE RESPONDING`;
                 document.getElementById('voice-state').style.color = "var(--neon-magenta)";
             }
 
