@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini-Powered Research Cyborg Workspace & Hand Tracking</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "@google/genai": "https://esm.run/@google/genai"
+        }
+      }
+    </script>
+
+    <style>
+        :root {
+            --neon-cyan: #00f0ff;
+            --neon-magenta: #ff007f;
+            --neon-yellow: #ffea00;
+        }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #05050a;
+            font-family: 'Segoe UI', sans-serif;
+            user-select: none;
+        }
+        #canvas-container { width: 100%; height: 100%; position: absolute; top:0; left:0; z-index: 1; }
+        
+        #webcam { position: absolute; bottom: 20px; right: 20px; width: 180px; height: 135px; 
+                  border: 2px solid var(--neon-magenta); border-radius: 8px; transform: scaleX(-1); z-index: 10;
+                  box-shadow: 0 0 15px rgba(255, 0, 127, 0.4); background: #000; }
+
+        /* HUD Panels */
+        #hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; box-sizing: border-box; padding: 20px; }
+        
+        .hud-panel { position: absolute; background: rgba(5, 5, 15, 0.9); border: 1px solid var(--neon-cyan); backdrop-filter: blur(10px); padding: 15px; color: var(--neon-cyan); font-weight: bold; border-radius: 6px; box-shadow: 0 0 15px rgba(0,240,255,0.1); }
+        #telemetry { top: 20px; left: 20px; width: 260px; font-size: 0.9rem; }
+        #assistant-panel { top: 20px; right: 20px; width: 340px; border-color: var(--neon-magenta); color: var(--neon-magenta); }
+        #tutorial-panel { top: 320px; right: 20px; width: 340px; border-color: var(--neon-yellow); color: var(--neon-yellow); }
+        #controls { bottom: 20px; left: 20px; pointer-events: auto; display: flex; gap: 10px; }
+        
+        .step-item { margin: 6px 0; padding: 6px; border-left: 3px solid #333; color: #666; font-size: 0.85rem; transition: all 0.3s; }
+        .step-item.active { border-left-color: var(--neon-yellow); color: var(--neon-yellow); background: rgba(255,234,0,0.05); }
+        .step-item.done { border-left-color: #00ff66; color: #00ff66; text-decoration: line-through; opacity: 0.5; }
+
+        button { background: transparent; border: 1px solid var(--neon-cyan); color: var(--neon-cyan); padding: 10px 18px; cursor: pointer; font-weight: bold; border-radius: 4px; transition: all 0.3s; }
+        button:hover, button.active { background: var(--neon-cyan); color: #05050a; box-shadow: 0 0 15px var(--neon-cyan); }
+        
+        .meter-container { width: 100%; background: #101020; border: 1px solid var(--neon-cyan); height: 8px; margin-top: 4px; border-radius: 2px; overflow: hidden; }
+        .meter-bar { height: 100%; background: var(--neon-cyan); width: 0%; }
+        
+        #audio-prompt { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050d; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--neon-cyan); z-index: 100; cursor: pointer; }
+        #audio-prompt h2 { font-size: 2rem; letter-spacing: 3px; margin-bottom: 10px; text-shadow: 0 0 10px var(--neon-cyan); }
+        
+        #api-key-input { background: #101020; border: 1px solid var(--neon-magenta); color: #fff; padding: 10px; width: 300px; border-radius: 4px; text-align: center; margin-top: 20px; font-weight: bold; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+    <div id="audio-prompt">
+        <h2>⚡ INITIALIZE GEMINI CORE ⚡</h2>
+        <p>Enter your Gemini API key below to establish the intelligence matrix link,</p>
+        <p>then click anywhere on the background to mount the graphics grid.</p>
+        <input type="password" id="api-key-input" placeholder="PASTE GEMINI_API_KEY HERE" onclick="event.stopPropagation()">
+        <button style="margin-top: 15px; border-color: var(--neon-magenta); color: var(--neon-magenta);" onclick="initSystem()">BOOT SYSTEM ENGINE</button>
+    </div>
+
+    <div id="canvas-container"></div>
+    <video id="webcam" autoplay playsinline></video>
+
+    <div id="hud">
+        <div id="telemetry" class="hud-panel">
+            <div style="border-bottom: 1px solid var(--neon-cyan); margin-bottom: 8px; padding-bottom:4px;">📊 GRID TELEMETRY</div>
+            <div>X-COORD: <span id="pos-x">0.00</span></div>
+            <div>Y-COORD: <span id="pos-y">0.00</span></div>
+            <div>Z-DEPTH: <span id="pos-z">0.00</span></div>
+            <div>LIGHT MATRIX: <span id="subsystem-state" style="color: var(--neon-magenta);">OFF</span></div>
+            <div>GEMINI NODE: <span id="voice-state" style="color: var(--neon-yellow);">IDLE</span></div>
+            <div>ENGINE FREQ: <span id="engine-rpm" style="color: var(--neon-cyan);">0 Hz</span></div>
+            <div style="margin-top: 8px; font-size: 0.75rem;">GESTURE INTERACTION FORCE:</div>
+            <div class="meter-container"><div id="force-bar" class="meter-bar"></div></div>
+        </div>
+
+        <div id="assistant-panel" class="hud-panel">
+            <div style="border-bottom: 1px solid var(--neon-magenta); margin-bottom: 8px; padding-bottom:4px;">🤖 GEMINI CRADLE MATRIX</div>
+            <div id="assistant-text" style="font-size: 0.85rem; font-weight: normal; color: #fff; min-height: 140px; overflow-y: auto; max-height: 200px; line-height: 1.4;">System offline. Awaiting secure credential verification...</div>
+        </div>
+
+        <div id="tutorial-panel" class="hud-panel">
+            <div style="border-bottom: 1px solid var(--neon-yellow); margin-bottom: 8px; padding-bottom:4px;">🎓 WORKSPACE CALIBRATION</div>
+            <div id="step-1" class="step-item active">1. Move hand LEFT & RIGHT to slide engine</div>
+            <div id="step-2" class="step-item">2. Push hand CLOSER to shift deep space</div>
+            <div id="step-3" class="step-item">3. Make a tight FIST to dynamically scale up</div>
+            <div id="step-4" class="step-item">4. PINCH Thumb + Index to activate subsystems</div>
+            <div id="step-5" class="step-item">5. Ask ANY question for Gemini to research</div>
+            <div id="calibration-status" style="margin-top:10px; font-size:0.8rem; text-align:center; color:#fff;">CALIBRATION: PENDING</div>
+        </div>
+
+        <div id="controls" class="hud-panel">
+            <button id="btn-car" class="active" onclick="switchModel('car')">Cyber-Car</button>
+            <button id="btn-bike" onclick="switchModel('bike')">E-Bike</button>
+            <button id="btn-human" onclick="switchModel('human')">Cyborg Mesh</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { GoogleGenAI } from "@google/genai";
+
+        // --- SCENE SETUP GLOBALS ---
+        let scene, camera, renderer, controls, activeModelName = 'car';
+        let models = {};
+        let carHeadlights = [], bikeHighBeam = null, cyborgEye = null;
+
+        // Kinematic tracking vectors
+        let targetScale = 1.0, currentScale = 1.0;
+        let targetPos = new THREE.Vector3(0, 0, 0), currentPos = new THREE.Vector3(0, 1.0, 0);
+
+        // Calibration Tracker Workflow State
+        let tutorialStep = 1; 
+        let step1History = { minX: false, maxX: false };
+        let step2History = { deepZ: false };
+
+        // Speech recognition and deep thought state variables
+        let recognition = null;
+        let isSpeakingBack = false;
+        let isRecognitionActive = false;
+        let aiClient = null;
+
+        // --- CORE SYNTHESIZED AUDIO ENGINE ---
+        let audioCtx = null;
+        let carOsc1 = null, carOsc2 = null, carGain = null;
+        let bikeOsc = null, bikeGain = null;
+        let audioFilter = null;
+
+        function initAudioEngine() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            
+            audioCtx = new AudioContext();
+
+            // Setup lowpass master filter to give sounds a heavy mechanical resonance
+            audioFilter = audioCtx.createBiquadFilter();
+            audioFilter.type = "lowpass";
+            audioFilter.frequency.setValueAtTime(400, audioCtx.currentTime);
+            audioFilter.connect(audioCtx.destination);
+
+            // 1. CAR ENGINE AUDIO RIG (Low Frequency Rumble Synthesizer)
+            carGain = audioCtx.createGain();
+            carGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            carGain.connect(audioFilter);
+
+            carOsc1 = audioCtx.createOscillator();
+            carOsc1.type = "sawtooth";
+            carOsc1.frequency.setValueAtTime(50, audioCtx.currentTime); 
+
+            carOsc2 = audioCtx.createOscillator();
+            carOsc2.type = "triangle";
+            carOsc2.frequency.setValueAtTime(25, audioCtx.currentTime);  
+
+            carOsc1.connect(carGain);
+            carOsc2.connect(carGain);
+            carOsc1.start();
+            carOsc2.start();
+
+            // 2. BIKE ENGINE AUDIO RIG (High Rev Whine Synthesizer)
+            bikeGain = audioCtx.createGain();
+            bikeGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            bikeGain.connect(audioFilter);
+
+            bikeOsc = audioCtx.createOscillator();
+            bikeOsc.type = "sawtooth";
+            bikeOsc.frequency.setValueAtTime(120, audioCtx.currentTime); 
+
+            bikeOsc.connect(bikeGain);
+            bikeOsc.start();
+
+            updateEngineAudioState();
+        }
+
+        function updateEngineAudioState() {
+            if (!audioCtx) return;
+
+            let targetCarVol = 0.0;
+            let targetBikeVol = 0.0;
+
+            if (!isSpeakingBack) {
+                if (activeModelName === 'car') targetCarVol = 0.3;
+                if (activeModelName === 'bike') targetBikeVol = 0.2;
+            }
+
+            carGain.gain.setTargetAtTime(targetCarVol, audioCtx.currentTime, 0.1);
+            bikeGain.gain.setTargetAtTime(targetBikeVol, audioCtx.currentTime, 0.1);
+        }
+
+        function modulatePitchFromGripForce(forceValue) {
+            if (!audioCtx || isSpeakingBack) return;
+
+            if (activeModelName === 'car') {
+                const f1 = 50 + (forceValue * 90);  
+                const f2 = 25 + (forceValue * 45);  
+                carOsc1.frequency.setTargetAtTime(f1, audioCtx.currentTime, 0.05);
+                carOsc2.frequency.setTargetAtTime(f2, audioCtx.currentTime, 0.05);
+                audioFilter.frequency.setTargetAtTime(350 + (forceValue * 500), audioCtx.currentTime, 0.05);
+                document.getElementById('engine-rpm').innerText = `${Math.floor(f1)} Hz`;
+            } 
+            else if (activeModelName === 'bike') {
+                const fb = 120 + (forceValue * 220); 
+                bikeOsc.frequency.setTargetAtTime(fb, audioCtx.currentTime, 0.05);
+                audioFilter.frequency.setTargetAtTime(500 + (forceValue * 900), audioCtx.currentTime, 0.05);
+                document.getElementById('engine-rpm').innerText = `${Math.floor(fb)} Hz`;
+            } else {
+                document.getElementById('engine-rpm').innerText = "0 Hz";
+            }
+        }
+
+        // --- HIGH ACCURACY SPEECH SYNTHESIS DRIVER ---
+        window.speak = function(text, isModelTalking = false) {
+            if ('speechSynthesis' in window) {
+                stopListening(); 
+                window.speechSynthesis.cancel();
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                
+                if (isModelTalking) {
+                    utterance.pitch = 0.65; 
+                    utterance.rate = 0.95;  
+                    isSpeakingBack = true;
+                    updateEngineAudioState(); 
+                } else {
+                    utterance.pitch = 1.0;
+                    utterance.rate = 1.0;
+                }
+
+                utterance.onend = () => {
+                    isSpeakingBack = false;
+                    if (cyborgEye) cyborgEye.scale.y = 1.0; 
+                    updateEngineAudioState(); 
+                    if (tutorialStep >= 5) {
+                        setTimeout(restartListeningSafely, 600); 
+                    }
+                };
+
+                utterance.onerror = (e) => {
+                    console.error("Audio generation exception caught: ", e);
+                    isSpeakingBack = false;
+                    updateEngineAudioState();
+                    if (tutorialStep >= 5) setTimeout(restartListeningSafely, 600);
+                };
+
+                document.getElementById('assistant-text').innerText = text;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // --- HIGH POWER SPEECH INPUT & DEBOUNCED AUTOMATIC RECOVERY ENGINE ---
+        function initSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                document.getElementById('assistant-text').innerText = "Web Speech engine unavailable natively in this terminal.";
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            
+            // Core Upgrades for high-power parsing:
+            recognition.continuous = true;       // Avoids baseline context drops
+            recognition.interimResults = true;    // Allows real-time analysis before speech finishes
+            recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
+
+            let finalTranscript = '';
+
+            recognition.onstart = () => {
+                isRecognitionActive = true;
+                document.getElementById('voice-state').innerText = "LISTENING AMBIENT";
+                document.getElementById('voice-state').style.color = "#00ff66";
+            };
+
+            recognition.onerror = (event) => {
+                console.warn("Speech engine warning caught:", event.error);
+                if (event.error === 'no-speech' || event.error === 'network') {
+                    isRecognitionActive = false;
+                    restartListeningSafely();
+                }
+            };
+
+            recognition.onend = () => {
+                isRecognitionActive = false;
+                restartListeningSafely(); // Force auto-resync loop closure
+            };
+
+            recognition.onresult = async (event) => {
+                let interimTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                const workingPhrase = finalTranscript || interimTranscript;
+                if (workingPhrase.trim().length > 0) {
+                    document.getElementById('assistant-text').innerText = `Capturing Live Audio: "${workingPhrase}"`;
+                }
+
+                if (finalTranscript.trim().length > 0) {
+                    const userQuestion = finalTranscript.trim();
+                    finalTranscript = ''; 
+                    
+                    document.getElementById('assistant-text').innerText = `Querying Gemini Matrix: "${userQuestion}"...`;
+                    forceSwitchToHuman();
+
+                    document.getElementById('voice-state').innerText = "THINKING";
+                    document.getElementById('voice-state').style.color = "var(--neon-yellow)";
+
+                    stopListening(); // Mute local audio tracking while waiting for pipeline generation execution
+
+                    try {
+                        if (!aiClient) {
+                            speak("Gemini intelligence pipeline uninitialized. Please supply a valid key coordinate.", true);
+                            return;
+                        }
+
+                        const response = await aiClient.models.generateContent({
+                            model: 'gemini-2.5-flash',
+                            contents: userQuestion,
+                            config: {
+                                systemInstruction: "You are an advanced autonomous cyborg 3D assistant model. Speak directly to the user. Keep your answers concise, fluid, and strictly limited to 2 short sentences. Do not use asterisks or markdown formatting structures.",
+                            }
+                        });
+
+                        const cleanReply = response.text.trim();
+                        speak(cleanReply, true);
+
+                    } catch (apiError) {
+                        console.error("Gemini Frame Failure: ", apiError);
+                        speak("Secure link to Gemini cloud cluster denied. Verify your API configuration matrix.", true);
+                    }
+
+                    if (tutorialStep === 5) {
+                        document.getElementById('step-5').className = 'step-item done';
+                        tutorialStep = 6;
+                        document.getElementById('calibration-status').innerText = "CALIBRATION: ONLINE";
+                        document.getElementById('calibration-status').style.color = "#00ff66";
+                    }
+                }
+            };
+        }
+
+        function restartListeningSafely() {
+            if (tutorialStep >= 5 && !isSpeakingBack && !isRecognitionActive) {
+                try {
+                    recognition.start();
+                    isRecognitionActive = true;
+                    document.getElementById('voice-state').innerText = "LISTENING ACTIVE";
+                    document.getElementById('voice-state').style.color = "var(--neon-cyan)";
+                } catch (e) {}
+            }
+        }
+
+        function stopListening() {
+            if (recognition && isRecognitionActive) {
+                try { recognition.stop(); } catch(e) {}
+            }
+        }
+
+        function forceSwitchToHuman() {
+            if (activeModelName !== 'human') {
+                scene.remove(models[activeModelName]);
+                activeModelName = 'human';
+                scene.add(models['human']);
+                document.querySelectorAll('#controls button').forEach(b => b.classList.remove('active'));
+                document.getElementById('btn-human').classList.add('active');
+                updateEngineAudioState();
+            }
+        }
+
+        window.initSystem = function() {
+            const apiKey = document.getElementById('api-key-input').value.trim();
+            if (!apiKey) {
+                alert("An active Gemini API Key credential is required to boot the cloud logic nodes.");
+                return;
+            }
+
+            aiClient = new GoogleGenAI({ apiKey: apiKey });
+
+            document.getElementById('audio-prompt').style.display = 'none';
+            if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+            initAudioEngine();
+            initSpeechRecognition();
+            
+            speak("Gemini link authorized. Acoustic propulsion drives operational. Slide your target hand left or right.");
+            initMediaPipe();
+        }
+
+        // --- THREE.JS GRAPHICS SETUP ---
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x040408);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 4, 10);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, 1.0, 0);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const dirLight1 = new THREE.DirectionalLight(0x00f0ff, 1.5); dirLight1.position.set(5, 10, 5); scene.add(dirLight1);
+            const dirLight2 = new THREE.DirectionalLight(0xff007f, 1.2); dirLight2.position.set(-5, 5, -5); scene.add(dirLight2);
+
+            const grid = new THREE.GridHelper(30, 30, 0xff007f, 0x222233);
+            scene.add(grid);
+
+            buildProceduralModels();
+            scene.add(models['car']);
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        // --- PROCEDURAL 3D MESH GENERATION ---
+        function buildProceduralModels() {
+            const matDark = new THREE.MeshBasicMaterial({ color: 0x151821 });
+            const matCyan = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+            const matMagenta = new THREE.MeshBasicMaterial({ color: 0xff007f });
+            const matYellow = new THREE.MeshBasicMaterial({ color: 0xffea00 });
+            const matGlass = new THREE.MeshBasicMaterial({ color: 0x55ffff, transparent: true, opacity: 0.4 });
+            const matWheel = new THREE.MeshBasicMaterial({ color: 0x08080c });
+
+            // 1. CYBER CAR
+            const carGroup = new THREE.Group();
+            const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 4.0), matDark); chassis.position.y = 0.4; carGroup.add(chassis);
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.6, 1.8), matGlass); cabin.position.set(0, 0.95, -0.2); carGroup.add(cabin);
+
+            carHeadlights = [];
+            [-0.7, 0.7].forEach(x => {
+                const beamGeo = new THREE.CylinderGeometry(0.05, 0.5, 3.0, 16, 1, true);
+                beamGeo.translate(0, 1.25, 0);
+                const beam = new THREE.Mesh(beamGeo, matCyan); beam.position.set(x, 0.4, 2.0); beam.rotation.x = Math.PI / 2; beam.visible = false;
+                carGroup.add(beam); carHeadlights.push(beam);
+            });
+
+            [[-1.05, 0.35, 1.2], [1.05, 0.35, 1.2], [-1.05, 0.35, -1.2], [1.05, 0.35, -1.2]].forEach(pos => {
+                const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.3, 16), matWheel); wh.rotation.z = Math.PI / 2; wh.position.set(...pos); carGroup.add(wh);
+            });
+            models['car'] = carGroup;
+
+            // 2. BIKE
+            const bikeGroup = new THREE.Group();
+            const frame = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 1.8), matDark); frame.position.y = 0.8; bikeGroup.add(frame);
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 12), matCyan); handle.rotation.z = Math.PI / 2; handle.position.set(0, 1.3, 0.6); bikeGroup.add(handle);
+
+            const bBeamGeo = new THREE.CylinderGeometry(0.04, 0.6, 3.5, 16, 1, true); bBeamGeo.translate(0, 1.75, 0);
+            bikeHighBeam = new THREE.Mesh(bBeamGeo, matYellow); bikeHighBeam.position.set(0, 1.25, 0.7); bikeHighBeam.rotation.x = Math.PI / 2; bikeHighBeam.visible = false; bikeGroup.add(bikeHighBeam);
+
+            [[0, 0.5, 0.9], [0, 0.5, -0.9]].forEach(pos => {
+                const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.15, 16), matWheel); wh.rotation.z = Math.PI / 2; wh.position.set(...pos); bikeGroup.add(wh);
+            });
+            models['bike'] = bikeGroup;
+
+            // 3. HUMAN CYBORG
+            const humanGroup = new THREE.Group();
+            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.18, 1.0, 16), matDark); torso.position.y = 1.4; humanGroup.add(torso);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 16), matDark); head.position.y = 2.1; humanGroup.add(head);
+
+            cyborgEye = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.15), matMagenta);
+            cyborgEye.position.set(0, 2.12, 0.15);
+            humanGroup.add(cyborgEye);
+
+            [[-0.12, 0.45], [0.12, 0.45]].forEach(x => {
+                const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.06, 0.9, 12), matCyan); leg.position.set(x[0], x[1], 0); humanGroup.add(leg);
+            });
+            models['human'] = humanGroup;
+        }
+
+        // --- MODEL VIEW ROUTER ---
+        window.switchModel = function(name) {
+            if (tutorialStep <= 4) return; 
+            scene.remove(models[activeModelName]); activeModelName = name; scene.add(models[activeModelName]);
+            document.querySelectorAll('#controls button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-${name}`).classList.add('active');
+            
+            updateEngineAudioState();
+            speak(`Rendering updated to ${name} tracking layout.`);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateSubsystems(isActive) {
+            if (isSpeakingBack) return;
+
+            document.getElementById('subsystem-state').innerText = isActive ? "ON" : "OFF";
+            document.getElementById('subsystem-state').style.color = isActive ? "#00ff66" : "var(--neon-magenta)";
+
+            carHeadlights.forEach(beam => beam.visible = isActive);
+            if (bikeHighBeam) bikeHighBeam.visible = isActive;
+            if (cyborgEye) cyborgEye.scale.y = isActive ? 3.5 : 1.0;
+        }
+
+        // --- GRAPHICS EXECUTION AND RENDER CYCLE ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            currentScale += (targetScale - currentScale) * 0.12;
+            currentPos.lerp(targetPos, 0.1);
+
+            const activeMesh = models[activeModelName];
+            if (activeMesh) {
+                activeMesh.scale.setScalar(currentScale);
+                activeMesh.position.copy(currentPos);
+                activeMesh.rotation.y += 0.005;
+            }
+
+            if (isSpeakingBack && cyborgEye && activeModelName === 'human') {
+                cyborgEye.scale.y = 1.8 + Math.sin(performance.now() * 0.03) * 1.5;
+                document.getElementById('voice-state').innerText = "GEMINI CORE RESPONDING";
+                document.getElementById('voice-state').style.color = "var(--neon-magenta)";
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- CALIBRATION INTERACTION VALIDATOR ---
+        function validateTutorialSteps(x, y, z, force, isPinching) {
+            if (tutorialStep === 1) {
+                if (x < -1.2) step1History.minX = true;
+                if (x > 1.2) step1History.maxX = true;
+                if (step1History.minX && step1History.maxX) {
+                    document.getElementById('step-1').className = 'step-item done';
+                    tutorialStep = 2; document.getElementById('step-2').className = 'step-item active';
+                    speak("Coordinates locked. Step two: Move your hand closer to translate spatial depth.");
+                }
+            } else if (tutorialStep === 2) {
+                if (z > 1.5) step2History.deepZ = true;
+                if (step2History.deepZ) {
+                    document.getElementById('step-2').className = 'step-item done';
+                    tutorialStep = 3; document.getElementById('step-3').className = 'step-item active';
+                    speak("Depth verified. Step three: Close your fist to calibrate scaling and engine throttle force.");
+                }
+            } else if (tutorialStep === 3) {
+                if (force > 0.82) {
+                    document.getElementById('step-3').className = 'step-item done';
+                    tutorialStep = 4; document.getElementById('step-4').className = 'step-item active';
+                    speak("Scale module clear. Step four: Pinch your thumb and index together to test subsystem triggers.");
+                }
+            } else if (tutorialStep === 4) {
+                if (isPinching) {
+                    document.getElementById('step-4').className = 'step-item done';
+                    tutorialStep = 5; document.getElementById('step-5').className = 'step-item active';
+                    speak("Hand interface tracking online. Final Step: Ask me any deep research question out loud right now.");
+                    
+                    setTimeout(restartListeningSafely, 4500);
+                }
+            }
+        }
+
+        // --- COMPUTER VISION PIPELINE ---
+        function initMediaPipe() {
+            const video = document.getElementById('webcam');
+            const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+            
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+            hands.onResults(onHandResults);
+
+            const cameraUtils = new Camera(video, {
+                onFrame: async () => { await hands.send({ image: video }); }, width: 160, height: 120
+            });
+            
+            cameraUtils.start().catch(err => {
+                console.warn("Camera streaming bypassed.", err);
+            });
+        }
+
+        function onHandResults(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                document.getElementById('force-bar').style.width = '0%';
+                updateSubsystems(false);
+                modulatePitchFromGripForce(0.0); 
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+            
+            const rawX = landmarks[9].x; const rawY = landmarks[9].y;
+            targetPos.x = (rawX - 0.5) * -6.5;
+            targetPos.y = (0.5 - rawY) * 4.5 + 1.0;
+
+            const dxZ = landmarks[17].x - landmarks[0].x; const dyZ = landmarks[17].y - landmarks[0].y;
+            const computedDistance = Math.sqrt(dxZ*dxZ + dyZ*dyZ);
+            targetPos.z = (computedDistance - 0.18) * 12;
+
+            const dxF = landmarks[12].x - landmarks[0].x; const dyF = landmarks[12].y - landmarks[0].y;
+            const fingerExtension = Math.sqrt(dxF*dxF + dyF*dyF);
+            let forceValue = (0.50 - fingerExtension) * 4.0;
+            forceValue = Math.max(0, Math.min(1, forceValue));
+            
+            document.getElementById('force-bar').style.width = `${forceValue * 100}%`;
+            targetScale = 0.6 + (forceValue * 1.4);
+
+            modulatePitchFromGripForce(forceValue);
+
+            const pX = landmarks[8].x - landmarks[4].x; const pY = landmarks[8].y - landmarks[4].y;
+            const currentPinchGap = Math.sqrt(pX*pX + pY*pY);
+            const isPinching = currentPinchGap < 0.035;
+
+            updateSubsystems(isPinching);
+
+            document.getElementById('pos-x').innerText = targetPos.x.toFixed(2);
+            document.getElementById('pos-y').innerText = targetPos.y.toFixed(2);
+            document.getElementById('pos-z').innerText = targetPos.z.toFixed(2);
+
+            validateTutorialSteps(targetPos.x, targetPos.y, targetPos.z, forceValue, isPinching);
+        }
+
+        initThree();
+    </script>
+</body>
+</html>
