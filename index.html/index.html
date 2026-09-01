@@ -415,107 +415,32 @@
         // --- PROVIDER-AGNOSTIC AI QUERY DISPATCH ---
         const SYSTEM_INSTRUCTION = "You are an advanced autonomous cyborg 3D assistant model. Speak directly to the user. Keep your answers concise, fluid, and strictly limited to 2 short sentences. Do not use asterisks or markdown formatting structures.";
 
-        function extractGeminiText(response) {
-            if (!response) return '';
-
-            if (typeof response.text === 'string' && response.text.trim()) {
-                return response.text.trim();
-            }
-
-            const fromCandidates = response?.candidates?.[0]?.content?.parts;
-            if (Array.isArray(fromCandidates)) {
-                const text = fromCandidates
-                    .map(part => typeof part?.text === 'string' ? part.text : '')
-                    .join('')
-                    .trim();
-                if (text) return text;
-            }
-
-            const fromContent = response?.output?.[0]?.content;
-            if (Array.isArray(fromContent)) {
-                const text = fromContent
-                    .map(part => typeof part?.text === 'string' ? part.text : '')
-                    .join('')
-                    .trim();
-                if (text) return text;
-            }
-
-            return '';
-        }
-
-        function parseOpenAIError(errorBody) {
-            if (!errorBody) return 'No error details returned.';
-            if (typeof errorBody === 'string') return errorBody;
-            if (errorBody.error?.message) return errorBody.error.message;
-            if (errorBody.message) return errorBody.message;
-            return JSON.stringify(errorBody).slice(0, 500);
-        }
-
         async function queryAI(userQuestion) {
-            if (aiProvider === 'gemini') {
-                if (!aiClient) {
-                    throw new Error('Gemini client is not initialized.');
-                }
+            const provider = aiProvider;
+            const body = {
+                provider,
+                question: userQuestion
+            };
 
-                const response = await aiClient.models.generateContent({
-                    model: 'gemini-2.5-flash',
-                    contents: [{
-                        role: 'user',
-                        parts: [{ text: userQuestion }]
-                    }],
-                    config: {
-                        systemInstruction: SYSTEM_INSTRUCTION,
-                        temperature: 0.7,
-                        maxOutputTokens: 220
-                    }
-                });
+            const res = await fetch('http://localhost:3000/api/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
 
-                const text = extractGeminiText(response);
-                if (!text) {
-                    const detail = response?.promptFeedback || response?.error || 'Gemini returned an empty response.';
-                    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail).slice(0, 500));
-                }
+            const data = await res.json().catch(() => ({}));
 
-                return text;
+            if (!res.ok) {
+                const message = data?.error || 'AI request failed.';
+                throw new Error(message);
             }
 
-            if (aiProvider === 'openai') {
-                const res = await fetch('https://api.openai.com/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${openaiApiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: 'gpt-4o-mini',
-                        messages: [
-                            { role: 'system', content: SYSTEM_INSTRUCTION },
-                            { role: 'user', content: userQuestion }
-                        ],
-                        max_tokens: 180,
-                        temperature: 0.7
-                    })
-                });
-
-                const responseText = await res.text();
-                let body = null;
-                try {
-                    body = responseText ? JSON.parse(responseText) : null;
-                } catch (e) {
-                    body = responseText;
-                }
-
-                if (!res.ok) {
-                    const errMessage = parseOpenAIError(body);
-                    throw new Error(`OpenAI HTTP ${res.status}: ${errMessage}`);
-                }
-
-                const reply = body?.choices?.[0]?.message?.content;
-                if (!reply) throw new Error('OpenAI returned an empty response.');
-                return Array.isArray(reply) ? reply.map(part => part?.text || '').join(' ').trim() : String(reply).trim();
+            const answer = data?.answer;
+            if (!answer) {
+                throw new Error('The AI service returned an empty response.');
             }
 
-            throw new Error(`Unknown AI provider: ${aiProvider}`);
+            return String(answer).trim();
         }
 
         // Keep the boot-screen placeholder in sync with the selected provider
@@ -538,31 +463,35 @@
 
             aiProvider = selectedProvider;
 
-            try {
-                if (aiProvider === 'gemini') {
-                    aiClient = new GoogleGenAI({ apiKey: apiKey });
-                } else {
-                    openaiApiKey = apiKey;
+            fetch('http://localhost:3000/api/init', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: aiProvider, apiKey })
+            })
+            .then(async response => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data?.error || 'Server initialization failed.');
                 }
+
                 aiConfigured = true;
-            } catch (initError) {
-                console.error('AI client initialization failed:', initError);
-                alert(`${providerLabel} client setup failed. Please verify the API key and browser connectivity.`);
-                return;
-            }
+                document.getElementById('assistant-panel').firstElementChild.innerText = `🤖 ${providerLabel.toUpperCase()} CRADLE MATRIX`;
+                const nodeLabel = document.getElementById('ai-node-label');
+                if (nodeLabel) nodeLabel.innerText = `${providerLabel.toUpperCase()} NODE:`;
 
-            document.getElementById('assistant-panel').firstElementChild.innerText = `🤖 ${providerLabel.toUpperCase()} CRADLE MATRIX`;
-            const nodeLabel = document.getElementById('ai-node-label');
-            if (nodeLabel) nodeLabel.innerText = `${providerLabel.toUpperCase()} NODE:`;
+                document.getElementById('audio-prompt').style.display = 'none';
+                if (window.speechSynthesis) window.speechSynthesis.cancel();
 
-            document.getElementById('audio-prompt').style.display = 'none';
-            if (window.speechSynthesis) window.speechSynthesis.cancel();
-
-            initAudioEngine();
-            initSpeechRecognition();
-            
-            speak(`${providerLabel} link authorized. Acoustic propulsion drives operational. Slide your target hand left or right.`);
-            initMediaPipe();
+                initAudioEngine();
+                initSpeechRecognition();
+                
+                speak(`${providerLabel} link authorized. Acoustic propulsion drives operational. Slide your target hand left or right.`);
+                initMediaPipe();
+            })
+            .catch(error => {
+                console.error('AI server initialization failed:', error);
+                alert(`${providerLabel} link failed: ${error.message}`);
+            });
         }
 
         // --- THREE.JS GRAPHICS SETUP ---
