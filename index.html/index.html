@@ -57,8 +57,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     
-    <!-- MediaPipe Hand Tracking -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <!-- MediaPipe Hand Tracking (Hands only — no camera_utils to avoid blocking alerts) -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
     <style>
@@ -603,12 +602,16 @@
             <video id="webcam" autoplay playsinline muted></video>
             <div id="webcam-hud">
                 <div class="flex justify-between items-center">
-                    <span id="cam-status">CAMERA ACTIVE</span>
+                    <span id="cam-status">INITIALIZING...</span>
                     <span id="cam-fps" class="text-emerald-400">TRACKING</span>
                 </div>
                 <div class="flex justify-between items-center text-[8px] text-[#fed639]">
                     <span id="cam-hand-tag">AWAITING HAND</span>
                     <span id="cam-steer-tag">0°</span>
+                </div>
+                <!-- Retry button shown on camera error -->
+                <div id="cam-retry-row" style="display:none; margin-top:4px; text-align:center;">
+                    <button id="cam-retry-btn" onclick="retryCamera()" style="font-size:8px; padding:2px 8px; border:1px solid #fed639; background:rgba(254,214,57,0.15); color:#fed639; border-radius:3px; cursor:pointer; font-family:'JetBrains Mono',monospace;">&#x21bb; RETRY CAMERA</button>
                 </div>
             </div>
         </div>
@@ -2159,79 +2162,149 @@
         // 3. Left/Right Hand tracking directly maps to X-Translation and Y-Rotation (Steering)
         // 4. Multi-hand detection (both Left Hand and Right Hand supported)
         // =================================================================
-        let cameraModule = null;
+        // =================================================================
+        // FIXED & ENHANCED MEDIAPIPE GESTURE HAND TRACKING SYSTEM
+        // - No camera_utils (avoids blocking "Failed to acquire" alert)
+        // - Handles NotReadableError (camera in use) gracefully with auto-retry
+        // - App continues fully in pointer fallback mode if camera unavailable
+        // =================================================================
         let isMediaPipeRunning = false;
+        let cameraRetryCount = 0;
+        const MAX_CAMERA_RETRIES = 3;
+        let activeStream = null;
+        let handsInstance = null;
+
+        function setCamStatus(text, color) {
+            const el = document.getElementById('cam-status');
+            if (el) { el.innerText = text; el.style.color = color || '#00f0ff'; }
+        }
+
+        function showCamRetryBtn(show) {
+            const row = document.getElementById('cam-retry-row');
+            if (row) row.style.display = show ? 'block' : 'none';
+        }
+
+        window.retryCamera = async function() {
+            if (isMediaPipeRunning) return;
+            cameraRetryCount = 0;
+            showCamRetryBtn(false);
+            setCamStatus('RECONNECTING...', '#fed639');
+            await initMediaPipe();
+        };
+
+        async function tryAcquireCamera() {
+            // Release any existing stream first
+            if (activeStream) {
+                activeStream.getTracks().forEach(t => t.stop());
+                activeStream = null;
+            }
+            const videoElement = document.getElementById('webcam');
+            videoElement.srcObject = null;
+
+            // Try different constraint profiles — wider compatibility
+            const constraintProfiles = [
+                { video: { width: 320, height: 240, facingMode: 'user' }, audio: false },
+                { video: { facingMode: 'user' }, audio: false },
+                { video: true, audio: false }
+            ];
+
+            let lastErr = null;
+            for (const constraints of constraintProfiles) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    activeStream = stream;
+                    videoElement.srcObject = stream;
+                    videoElement.muted = true;
+                    videoElement.playsInline = true;
+                    videoElement.autoplay = true;
+                    await videoElement.play();
+                    return true; // success
+                } catch (e) {
+                    lastErr = e;
+                    // If camera is in use, wait briefly before next profile
+                    if (e.name === 'NotReadableError' || e.name === 'AbortError') {
+                        await new Promise(r => setTimeout(r, 600));
+                    }
+                }
+            }
+            throw lastErr;
+        }
 
         async function initMediaPipe() {
             if (isMediaPipeRunning) return;
             const videoElement = document.getElementById('webcam');
             if (!videoElement) return;
 
+            setCamStatus('CONNECTING...', '#fed639');
+
             try {
-                // Ensure video element attributes for modern browser compliance
-                videoElement.muted = true;
-                videoElement.playsInline = true;
-                videoElement.autoplay = true;
-
-                const hands = new Hands({
-                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-                });
-
-                hands.setOptions({
-                    maxNumHands: 1, // Single hand tracking for maximum 60fps real-time throughput
-                    modelComplexity: 0, // Lite model for ultra-low latency inference
-                    minDetectionConfidence: 0.4,
-                    minTrackingConfidence: 0.4
-                });
-
-                hands.onResults(onHandResults);
-
-                // Use MediaPipe Camera utility if available for optimal hardware-accelerated frame handling
-                if (typeof Camera !== 'undefined') {
-                    cameraModule = new Camera(videoElement, {
-                        onFrame: async () => {
-                            if (videoElement.readyState >= 2) {
-                                await hands.send({ image: videoElement });
-                            }
-                        },
-                        width: 320,
-                        height: 240
+                // Build MediaPipe Hands (reuse instance if already built)
+                if (!handsInstance) {
+                    handsInstance = new Hands({
+                        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
                     });
-                    await cameraModule.start();
-                } else {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { width: 320, height: 240, facingMode: "user" },
-                        audio: false
+                    handsInstance.setOptions({
+                        maxNumHands: 1,
+                        modelComplexity: 0,
+                        minDetectionConfidence: 0.4,
+                        minTrackingConfidence: 0.4
                     });
-                    videoElement.srcObject = stream;
-                    await videoElement.play();
-
-                    let isProcessingFrame = false;
-                    const processVideoFrame = async () => {
-                        if (videoElement.readyState >= 2 && !isProcessingFrame) {
-                            isProcessingFrame = true;
-                            try {
-                                await hands.send({ image: videoElement });
-                            } catch (err) {
-                                console.warn("MediaPipe frame send warn:", err);
-                            }
-                            isProcessingFrame = false;
-                        }
-                        requestAnimationFrame(processVideoFrame);
-                    };
-                    requestAnimationFrame(processVideoFrame);
+                    handsInstance.onResults(onHandResults);
                 }
 
+                // Acquire camera stream with retry-safe profiles
+                await tryAcquireCamera();
+
+                // Frame processing loop
+                let isProcessingFrame = false;
+                const processVideoFrame = async () => {
+                    if (!isMediaPipeRunning) return; // stop loop on teardown
+                    if (videoElement.readyState >= 2 && !isProcessingFrame && !videoElement.paused) {
+                        isProcessingFrame = true;
+                        try {
+                            await handsInstance.send({ image: videoElement });
+                        } catch (err) {
+                            // Silently ignore individual frame errors
+                        }
+                        isProcessingFrame = false;
+                    }
+                    requestAnimationFrame(processVideoFrame);
+                };
+
                 isMediaPipeRunning = true;
-                document.getElementById('cam-status').innerText = "CAMERA STREAMING (60 FPS)";
-                document.getElementById('cam-status').style.color = "#00ff66";
+                cameraRetryCount = 0;
+                showCamRetryBtn(false);
+                setCamStatus('CAMERA ACTIVE', '#00ff66');
+                document.getElementById('cam-fps').innerText = 'TRACKING';
+                document.getElementById('cam-fps').style.color = '#00ff66';
+                requestAnimationFrame(processVideoFrame);
 
             } catch (err) {
-                console.warn('Webcam initialization notice:', err);
-                document.getElementById('cam-status').innerText = "POINTER FALLBACK MODE";
-                document.getElementById('cam-status').style.color = "#fed639";
-                document.getElementById('hand-presence').innerText = "POINTER ACTIVE";
-                document.getElementById('hand-presence').style.color = "#fed639";
+                console.warn('Camera init error:', err.name, err.message);
+                isMediaPipeRunning = false;
+
+                const isInUse = err.name === 'NotReadableError' || err.name === 'AbortError';
+                const isDenied = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError';
+
+                if (isInUse && cameraRetryCount < MAX_CAMERA_RETRIES) {
+                    // Camera occupied — auto-retry after a short delay
+                    cameraRetryCount++;
+                    setCamStatus(`CAM BUSY — RETRY ${cameraRetryCount}/${MAX_CAMERA_RETRIES}`, '#fed639');
+                    setTimeout(() => initMediaPipe(), 2000 * cameraRetryCount);
+                } else if (isDenied) {
+                    setCamStatus('CAM: PERMISSION DENIED', '#ff007f');
+                    document.getElementById('cam-hand-tag').innerText = 'USE MOUSE TO STEER';
+                    showCamRetryBtn(false);
+                } else {
+                    // Give up — show retry button, continue in pointer mode
+                    setCamStatus('CAM UNAVAILABLE', '#ff007f');
+                    document.getElementById('cam-fps').innerText = 'MOUSE MODE';
+                    document.getElementById('cam-fps').style.color = '#fed639';
+                    document.getElementById('hand-presence').innerText = 'POINTER ACTIVE';
+                    document.getElementById('hand-presence').style.color = '#fed639';
+                    document.getElementById('cam-hand-tag').innerText = 'DRAG TO STEER';
+                    showCamRetryBtn(true);
+                }
             }
         }
 
