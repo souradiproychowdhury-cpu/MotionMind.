@@ -2201,11 +2201,10 @@
             const videoElement = document.getElementById('webcam');
             videoElement.srcObject = null;
 
-            // Try different constraint profiles — wider compatibility
+            // Use the simplest constraint first for maximum hardware compatibility on Windows
             const constraintProfiles = [
-                { video: { width: 320, height: 240, facingMode: 'user' }, audio: false },
-                { video: { facingMode: 'user' }, audio: false },
-                { video: true, audio: false }
+                { video: true, audio: false },
+                { video: { facingMode: 'user' }, audio: false }
             ];
 
             let lastErr = null;
