@@ -693,6 +693,12 @@
         let isCalibrating = false;
         let calibrationCompleted = false;
 
+        // ⚡ Direct Gemini API key for GitHub Pages (static hosting — no backend needed)
+        // Uses generativelanguage.googleapis.com directly from the browser
+        const GEMINI_API_KEY = 'AIzaSyAb8RN6KK00PmuCpMCaklFMDoiB55QxWaV0Loe66puppkpDPxHg';
+        const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro'];
+        let isStaticMode = false; // true when running on GitHub Pages (no backend)
+
         // Three.js State
         let scene, camera, renderer, controls;
         let activeModelName = 'car';
@@ -850,26 +856,39 @@
             }, 35);
         }
 
-        function bootBackendSession() {
-            const endpoint = window.location.origin.startsWith('http') ? '/api/init' : 'http://localhost:3000/api/init';
-            fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider: aiProvider })
-            })
-            .then(res => res.json())
-            .then(() => {
-                aiConfigured = true;
-                const pName = aiProvider.toUpperCase();
-                document.getElementById('assistant-title').innerText = `🤖 ${pName} CRADLE MATRIX`;
-                document.getElementById('ai-node-label').innerText = `${pName} NODE:`;
-            })
-            .catch(() => {
-                aiConfigured = false;
-                const pName = aiProvider.toUpperCase();
-                document.getElementById('assistant-title').innerText = `🤖 ${pName} (DEMO MODE)`;
-                document.getElementById('ai-node-label').innerText = `${pName} NODE (LOCAL):`;
-            });
+        async function bootBackendSession() {
+            // First try to reach local backend (localhost dev mode)
+            // If that fails, fall back to direct browser-side Gemini API (works on GitHub Pages)
+            const localEndpoint = 'http://localhost:3000/api/init';
+            const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+            if (isLocalhost) {
+                // Localhost: try the backend first
+                try {
+                    const res = await fetch(localEndpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ provider: aiProvider }),
+                        signal: AbortSignal.timeout(3000)
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                        aiConfigured = true;
+                        isStaticMode = false;
+                        const pName = aiProvider.toUpperCase();
+                        document.getElementById('assistant-title').innerText = `🤖 ${pName} CRADLE MATRIX`;
+                        document.getElementById('ai-node-label').innerText = `${pName} NODE:`;
+                        return;
+                    }
+                } catch (_) { /* fall through to direct API mode */ }
+            }
+
+            // Static/GitHub Pages mode: call Gemini directly from the browser
+            isStaticMode = true;
+            aiConfigured = true;
+            const pName = 'GEMINI';
+            document.getElementById('assistant-title').innerText = `🤖 ${pName} CRADLE MATRIX`;
+            document.getElementById('ai-node-label').innerText = `${pName} NODE:`;
         }
 
         function transitionToHeroWorkspace() {
@@ -1117,6 +1136,35 @@
             }
         };
 
+        async function callGeminiDirect(question) {
+            // Direct browser-side Gemini API call (works on GitHub Pages without backend)
+            const promptText = `You are an advanced cyborg 3D AI assistant. Answer the user's question directly, fluidly, and concisely in maximum 2 short sentences. Do not use asterisks, markdown, emojis, or bullet points.\nQuestion: ${question}`;
+            let lastError = null;
+
+            for (const model of GEMINI_MODELS) {
+                try {
+                    const res = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: promptText }] }],
+                                generationConfig: { maxOutputTokens: 150, temperature: 0.7 }
+                            })
+                        }
+                    );
+                    const data = await res.json();
+                    const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (candidate) {
+                        return candidate.replace(/[*#_~`]/g, '').trim().split(/(?<=[.!?])\s+/).slice(0, 2).join(' ').trim();
+                    }
+                    lastError = data.error?.message || 'No response';
+                } catch (e) { lastError = e.message; }
+            }
+            throw new Error(lastError || 'Gemini API unavailable');
+        }
+
         async function executeAIQuery(question) {
             const providerName = aiProvider === 'gemini' ? 'Gemini' : 'GPT';
             document.getElementById('assistant-text').innerText = `🧠 ${providerName} is analyzing: "${question}"...`;
@@ -1125,35 +1173,50 @@
 
             stopListening();
 
+            const completeStep = () => {
+                if (tutorialStep === 5) {
+                    document.getElementById('step-5').className = 'step-item done';
+                    tutorialStep = 6;
+                    document.getElementById('calibration-status').innerText = "CALIBRATION: COMPLETE • ALL NODES ACTIVE";
+                    document.getElementById('calibration-status').style.color = "#00ff66";
+                }
+            };
+
             try {
-                const endpoint = window.location.origin.startsWith('http') ? '/api/ask' : 'http://localhost:3000/api/ask';
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question, provider: aiProvider })
-                });
+                let answer;
 
-                if (!response.ok) throw new Error('API query failed');
-                const data = await response.json();
-                speak(data.answer, true);
-
-                if (tutorialStep === 5) {
-                    document.getElementById('step-5').className = 'step-item done';
-                    tutorialStep = 6;
-                    document.getElementById('calibration-status').innerText = "CALIBRATION: COMPLETE • ALL NODES ACTIVE";
-                    document.getElementById('calibration-status').style.color = "#00ff66";
+                if (!isStaticMode) {
+                    // Localhost backend path
+                    try {
+                        const response = await fetch('http://localhost:3000/api/ask', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ question, provider: aiProvider }),
+                            signal: AbortSignal.timeout(8000)
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            answer = data.answer;
+                        } else throw new Error('Backend failed');
+                    } catch (_) {
+                        // Backend unreachable — fall through to direct Gemini
+                        isStaticMode = true;
+                        answer = await callGeminiDirect(question);
+                    }
+                } else {
+                    // GitHub Pages / static mode — direct Gemini API
+                    answer = await callGeminiDirect(question);
                 }
+
+                speak(answer, true);
+                completeStep();
+
             } catch (err) {
-                if (tutorialStep === 5) {
-                    document.getElementById('step-5').className = 'step-item done';
-                    tutorialStep = 6;
-                    document.getElementById('calibration-status').innerText = "CALIBRATION: COMPLETE • ALL NODES ACTIVE";
-                    document.getElementById('calibration-status').style.color = "#00ff66";
-                }
+                completeStep();
                 const fallbackAnswers = {
-                    car: "The 3D Cyber-Car model features an aerodynamic mid-engine spaceframe, flared wheel arches, active downforce diffusers, and 4 high-torque electric hub motors.",
-                    bike: "The 3D Cyber-Bike model incorporates an inverted front fork, trellis frame tubes, an exposed multi-cylinder powertrain, and lightweight racing rims.",
-                    human: "The 3D Neural Human cyborg bust features cranial bone geometry, an internal synaptic core, and extensive neural axon fibers pulsing with data."
+                    car: "The 3D Cyber-Car features an aerodynamic mid-engine spaceframe, active downforce diffusers, and 4 high-torque electric hub motors.",
+                    bike: "The 3D Cyber-Bike incorporates an inverted front fork, trellis frame tubes, exposed multi-cylinder powertrain, and lightweight racing rims.",
+                    human: "The 3D Neural Human features cranial bone geometry, an internal synaptic core, and extensive neural axon fibers pulsing with data."
                 };
                 const answer = fallbackAnswers[activeModelName] || "3D spatial node synchronized. Telemetry and gesture controls operating at peak efficiency.";
                 speak(answer, true);
