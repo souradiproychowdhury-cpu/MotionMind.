@@ -586,6 +586,15 @@
     <!-- 2. MAIN 3D HERO WORKSPACE                                         -->
     <!-- ================================================================= -->
     <div id="workspace-container">
+        <!-- Dynamic Futuristic Cyber Tunnel Video Background (Active for 3D Cyber-Car & 3D Cyber-Bike; Hidden for Neural Human) -->
+        <div id="vehicle-bg-container" class="absolute inset-0 w-full h-full overflow-hidden pointer-events-none transition-opacity duration-700" style="z-index: 0; opacity: 1;">
+            <video id="vehicle-bg-video" autoplay loop muted playsinline preload="auto" class="absolute inset-0 w-full h-full object-cover transition-transform duration-200 ease-out" src="assets/cyber_tunnel_bg.mp4" style="filter: brightness(0.72) contrast(1.18) saturate(1.22); transform: scale(1.03); will-change: transform;"></video>
+            <!-- High-Tech Holographic Vignette & Cyber Depth Atmosphere -->
+            <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(circle at 50% 50%, rgba(5,8,17,0.12) 0%, rgba(5,8,17,0.65) 60%, rgba(5,8,17,0.92) 100%);"></div>
+            <!-- Subtle Cyber Data Scanlines Overlay -->
+            <div class="absolute inset-0 pointer-events-none opacity-20" style="background-image: repeating-linear-gradient(0deg, rgba(0, 240, 255, 0.08) 0px, rgba(0, 240, 255, 0.08) 1px, transparent 1px, transparent 4px);"></div>
+        </div>
+
         <!-- 3D Canvas -->
         <div id="canvas-container"></div>
         
@@ -621,6 +630,7 @@
                 <div>LIGHT MATRIX: <span id="subsystem-state" style="color: var(--neon-magenta);">OFF</span></div>
                 <div><span id="ai-node-label">AI NODE:</span> <span id="voice-state" style="color: var(--neon-yellow);">ONLINE</span></div>
                 <div>ENGINE FREQ: <span id="engine-rpm" style="color: var(--neon-cyan);">50 Hz</span></div>
+                <div>TUNNEL MATRIX: <span id="tunnel-state" style="color: #00ff66;">ACTIVE (240 FRAMES)</span></div>
                 
                 <div style="margin-top: 6px; font-size: 0.72rem;">LATERAL STEER CONTROL:</div>
                 <div class="meter-container"><div id="steer-bar" class="meter-bar" style="background: var(--neon-cyan); width: 50%;"></div></div>
@@ -879,6 +889,10 @@
                 if (!scene) {
                     initThree();
                 }
+                const bgVideo = document.getElementById('vehicle-bg-video');
+                if (bgVideo && (activeModelName === 'car' || activeModelName === 'bike')) {
+                    bgVideo.play().catch(e => console.log('Autoplay handled:', e));
+                }
                 initMediaPipe();
             }, 600);
         }
@@ -890,6 +904,10 @@
             const getStartedBtn = document.getElementById('btn-get-started');
 
             workspace.classList.remove('active');
+            const bgVideo = document.getElementById('vehicle-bg-video');
+            if (bgVideo && !bgVideo.paused) {
+                bgVideo.pause();
+            }
             landingPage.style.display = 'flex';
             
             setTimeout(() => {
@@ -1153,7 +1171,7 @@
             const container = document.getElementById('canvas-container');
 
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050811);
+            scene.background = null; // Transparent to display dynamic cyber tunnel video behind 3D vehicles
 
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
             camera.position.set(0, 3.2, 8.5);
@@ -1908,6 +1926,44 @@
             activeModelName = name;
             scene.add(models[activeModelName]);
 
+            // Background Video Controller (Car & Bike have Cyber Tunnel video; Human section has dark neural matrix)
+            const vehicleBg = document.getElementById('vehicle-bg-container');
+            const bgVideo = document.getElementById('vehicle-bg-video');
+            const tunnelState = document.getElementById('tunnel-state');
+
+            if (name === 'car' || name === 'bike') {
+                if (scene) scene.background = null;
+                if (vehicleBg) {
+                    vehicleBg.style.visibility = 'visible';
+                    vehicleBg.style.opacity = '1';
+                }
+                if (bgVideo && bgVideo.paused) {
+                    bgVideo.play().catch(e => console.log('Autoplay handled:', e));
+                }
+                if (tunnelState) {
+                    tunnelState.textContent = 'ACTIVE (240 FRAMES)';
+                    tunnelState.style.color = '#00ff66';
+                }
+            } else {
+                // Human section: explicitly hide tunnel background video, restore deep neural background
+                if (scene) scene.background = new THREE.Color(0x050811);
+                if (vehicleBg) {
+                    vehicleBg.style.opacity = '0';
+                    setTimeout(() => {
+                        if (activeModelName === 'human' && vehicleBg) {
+                            vehicleBg.style.visibility = 'hidden';
+                        }
+                    }, 700);
+                }
+                if (bgVideo && !bgVideo.paused) {
+                    bgVideo.pause();
+                }
+                if (tunnelState) {
+                    tunnelState.textContent = 'OFFLINE (NEURAL VOID)';
+                    tunnelState.style.color = '#4f687a';
+                }
+            }
+
             document.querySelectorAll('#controls button').forEach(b => b.classList.remove('active'));
             const activeBtn = document.getElementById(`btn-${name}`);
             if (activeBtn) activeBtn.classList.add('active');
@@ -1968,6 +2024,15 @@
                 }
                 activeMesh.rotation.y = currentRotY;
                 activeMesh.rotation.x = currentRotX;
+            }
+
+            // Real-time dynamic background video throttle & steering parallax (Car & Bike only)
+            const bgVideo = document.getElementById('vehicle-bg-video');
+            if (bgVideo && (activeModelName === 'car' || activeModelName === 'bike') && !bgVideo.paused) {
+                const targetRate = THREE.MathUtils.clamp(1.0 + (currentForce * 0.75), 0.75, 2.2);
+                bgVideo.playbackRate += (targetRate - bgVideo.playbackRate) * 0.08;
+                const steerShift = -targetRotY * 18;
+                bgVideo.style.transform = `scale(1.03) translateX(${steerShift.toFixed(1)}px)`;
             }
 
             const time = performance.now() * 0.001;
